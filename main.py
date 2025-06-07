@@ -10,13 +10,14 @@ from ui_components import render_sidebar_filters, render_kpis, render_aniversari
 from charts import create_employees_by_company_chart, create_employees_by_function_chart, \
     create_employees_by_children_chart, create_gender_distribution_chart, \
     create_education_level_distribution_chart, create_monthly_admissions_chart, \
-    create_cost_type_distribution_chart
+    create_cost_type_distribution_chart, create_hires_vs_terminations_chart # Removido create_monthly_turnover_trend_chart
+
 from utils import FreqUnica, meses_portugues
 
 # ================================== Configuração da Página ================================
 st.set_page_config(
     page_title="Dashboard de RH Interativo",
-    page_icon="img/cacto.jpg",
+    page_icon="img/cacto.jpg", # Mantido com a imagem local
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -24,14 +25,14 @@ alt.theme.enable("default") # Ativar o tema padrão do Altair
 
 # ================================== Carregamento e Pré-processamento de Dados ================================
 @st.cache_data
-def get_processed_data():
+def get_processed_data(uploaded_file):
     """
-    Carrega e pré-processa os dados do ficheiro Excel.
+    Carrega e pré-processa os dados do ficheiro Excel carregado.
     Esta função é cacheada para evitar recarregar os dados desnecessariamente.
     """
-    return load_and_preprocess_data('INDICADORES - NATURAYO -ATUALIZADA 01.xlsx')
-
-df_rh = get_processed_data()
+    if uploaded_file is not None:
+        return load_and_preprocess_data(uploaded_file)
+    return pd.DataFrame() # Retorna um DataFrame vazio se nenhum ficheiro for carregado
 
 # ================================== Navegação Principal (Cabeçalho) ================================
 o1, o2, o3, o4 = st.columns([1.2, 0.3, 0.4, 0.4])
@@ -52,10 +53,28 @@ with o4:
     if st.button("Tabelas de Resumo"):
         st.session_state.page = "Tabelas de Resumo"
 
-st.sidebar.image("img/im1.jpg", use_container_width=True)
+st.sidebar.image("img/im1.jpg", use_container_width=True) # Mantido com a imagem local
 st.sidebar.title("Painel de Controle RH")
 
-# ================================== Filtros de Data (Movidos para cá) ================================
+# ================================== Carregar Ficheiro Excel ================================
+st.sidebar.subheader("Carregar Dados do Excel")
+uploaded_file = st.sidebar.file_uploader(
+    "Arraste e solte o ficheiro Excel aqui ou clique para procurar.",
+    type=["xlsx"],
+    help="Carregue o ficheiro 'INDICADORES - NATURAYO -ATUALIZADA 01.xlsx' ou outro ficheiro Excel com estrutura semelhante."
+)
+
+if uploaded_file is None:
+    st.info("Por favor, carregue um ficheiro Excel para começar.")
+    st.stop() # Interrompe a execução do script até que um ficheiro seja carregado
+
+df_rh = get_processed_data(uploaded_file)
+
+if df_rh.empty:
+    st.warning("O ficheiro carregado está vazio ou não pôde ser processado. Verifique a estrutura do ficheiro.")
+    st.stop()
+
+# ================================== Filtros de Data ================================
 # Cálculo das datas mínima e máxima para o filtro de admissão
 if not df_rh.empty and 'admissao' in df_rh.columns and pd.api.types.is_datetime64_any_dtype(df_rh['admissao']):
     min_data_admissao_df = df_rh['admissao'].min().date()
@@ -65,28 +84,39 @@ else:
     max_data_admissao_df = datetime.date.today()
     st.sidebar.warning("Nenhum dado válido para filtrar datas de admissão.")
 
+
+# Ajuste: Definir a data inicial por padrão um ano antes da data final
+default_data_final = max_data_admissao_df
+
+# Calcular a data inicial padrão (um ano antes da data final padrão)
+default_data_inicial = default_data_final - datetime.timedelta(days=365)
+
+# Garantir que a data inicial padrão não seja anterior à data mínima real do DataFrame
+if default_data_inicial < min_data_admissao_df:
+    default_data_inicial = min_data_admissao_df
+
+
 data_inicial_admissao = st.sidebar.date_input(
     "Data Inicial:",
-    value=min_data_admissao_df,
+    value=default_data_inicial,
     min_value=min_data_admissao_df,
     max_value=max_data_admissao_df,
     format="DD/MM/YYYY",
-    key="data_inicial_key" # Adicionado key única
+    key="data_inicial_key"
 )
 data_final_admissao = st.sidebar.date_input(
     "Data Final:",
-    value=max_data_admissao_df,
-    min_value=min_data_admissao_df,
+    value=default_data_final,
+    min_value=data_inicial_admissao, # Permite selecionar o mesmo dia
     max_value=max_data_admissao_df,
     format="DD/MM/YYYY",
-    key="data_final_key" # Adicionado key única
+    key="data_final_key"
 )
 if data_inicial_admissao > data_final_admissao:
     st.error("Erro: A Data Inicial não pode ser maior que a Data Final.")
     st.stop()
 
-# ================================== Navegação por Rádio (Movido para cá) ================================
-# Movido para logo abaixo dos filtros de data
+# ================================== Navegação por Rádio ================================
 pagina = st.sidebar.radio("Navegar para:", ["Visão Geral", "Métricas e Gráficos", "Tabelas de Resumo"],
                           index=["Visão Geral", "Métricas e Gráficos", "Tabelas de Resumo"].index(st.session_state.page))
 
@@ -94,7 +124,6 @@ pagina = st.sidebar.radio("Navegar para:", ["Visão Geral", "Métricas e Gráfic
 st.sidebar.header("Outras Opções de Filtro")
 selected_filters = render_sidebar_filters(df_rh)
 
-# Adicionar as datas selecionadas ao dicionário de filtros
 selected_filters['data_inicial_admissao'] = data_inicial_admissao
 selected_filters['data_final_admissao'] = data_final_admissao
 
@@ -123,7 +152,7 @@ for key, value in selected_filters.items():
 # ================================== Renderização das Páginas ================================
 
 if pagina == "Visão Geral":
-    render_kpis(df_filtrado)
+    render_kpis(df_filtrado, data_inicial_admissao, data_final_admissao) # Passando as datas
 
     chart_rh_col1, chart_rh_col2 = st.columns([1.1, 0.9])
 
@@ -138,6 +167,29 @@ if pagina == "Visão Geral":
                 st.plotly_chart(fig_idade, use_container_width=True)
             else:
                 st.info("Sem dados para o gráfico de Relação de Funcionários por Empresa.")
+    
+    st.markdown("### Tendências da Força de Trabalho")
+    col_trend1, col_trend2 = st.columns(2)
+
+    with col_trend1:
+        with st.container(border=True):
+            if not df_filtrado.empty:
+                # NOVO GRÁFICO: Gênero
+                fig_sexo_trend = create_gender_distribution_chart(df_filtrado)
+                st.plotly_chart(fig_sexo_trend, use_container_width=True)
+            else:
+                st.info("Sem dados para o gráfico de Distribuição de Gênero.")
+    
+    with col_trend2:
+        with st.container(border=True):
+            if not df_filtrado.empty:
+                # NOVO GRÁFICO: Escolaridade
+                ordem_escolaridade = ['Fundamental', 'Médio', 'Superior Incompleto', 'Superior Completo', 'Pós-graduação']
+                fig_escolaridade_trend = create_education_level_distribution_chart(df_filtrado, ordem_escolaridade)
+                st.plotly_chart(fig_escolaridade_trend, use_container_width=True)
+            else:
+                st.info("Sem dados para o gráfico de Nível de Escolaridade.")
+
 
 elif pagina == "Métricas e Gráficos":
     if df_filtrado.empty:
@@ -243,8 +295,24 @@ elif pagina == "Tabelas de Resumo":
         with st.container(border=True):
             b1, b2 = st.columns([0.3, 1])
             with b1:
-                st.image("img/cacto.jpg")
-
+                st.image("img/cacto.jpg", width=75) # Mantido com a imagem local
             with b2:
                 with st.expander("Expandir"):
                     st.write("Lista de Funcionários de Férias")
+    
+    # --- Botão de Download na Página de Tabelas de Resumo ---
+    st.write("---")
+    st.subheader("Download dos Dados")
+    @st.cache_data
+    def convert_df_to_csv(df):
+        return df.to_csv(index=False).encode('utf-8')
+
+    csv = convert_df_to_csv(df_filtrado)
+
+    st.download_button(
+        label="Baixar dados filtrados em CSV",
+        data=csv,
+        file_name="dados_rh_filtrados.csv",
+        mime="text/csv",
+        help="Clique para baixar os dados da tabela atual em formato CSV."
+    )

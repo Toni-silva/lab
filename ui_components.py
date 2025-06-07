@@ -3,6 +3,7 @@ import streamlit as st
 import datetime
 import pandas as pd
 from utils import meses_portugues, FreqUnica
+from dateutil.relativedelta import relativedelta # Importar para cálculo de tempo de empresa
 
 def render_sidebar_filters(df):
     """
@@ -127,63 +128,78 @@ def render_sidebar_filters(df):
     filters['quantos_min_selecionados'] = quantos_filhos_selecionados[0]
     filters['quantos_max_selecionados'] = quantos_filhos_selecionados[1]
 
-    # Os filtros de data (Data Inicial/Final) foram REMOVIDOS COMPLETAMENTE desta função.
-    # Eles são agora renderizados e gerenciados EXCLUSIVAMENTE em main_dashboard.py.
-
     return filters
 
-def render_kpis(df_filtrado):
+def render_kpis(df_filtrado, data_inicial_periodo, data_final_periodo):
     """
     Renderiza a secção de Indicadores Chave de Desempenho (KPIs).
 
     Args:
         df_filtrado (pd.DataFrame): O DataFrame filtrado.
+        data_inicial_periodo (datetime.date): Data inicial do período de análise dos filtros.
+        data_final_periodo (datetime.date): Data final do período de análise dos filtros.
     """
-    kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns([0.8, 0.8, 0.8, 0.8, 0.4])
+    # O layout de colunas é ajustado para 4 colunas de tamanho igual
+    kpi1, kpi2, kpi3, kpi4 = st.columns([1, 1, 1, 1])
 
     total_funcionarios_filtrados = df_filtrado[df_filtrado['status'].isin(['ATIVO', 'EXPERIENCIA'])].shape[0]
 
-    contratacoes_2025 = df_filtrado[df_filtrado['admissao'].dt.year == 2025].shape[0]
+    # Contratações no período selecionado
+    contratacoes_no_periodo = df_filtrado[
+        (df_filtrado['admissao'].dt.date >= data_inicial_periodo) &
+        (df_filtrado['admissao'].dt.date <= data_final_periodo)
+    ].shape[0]
 
-    desligamentos_2025 = df_filtrado[(df_filtrado['status'] == 'DESLIGADO') & (df_filtrado['admissao'].dt.year == 2025)].shape[0]
+    # Converter as datas do período para Pandas Timestamp para comparação robusta
+    start_ts = pd.Timestamp(data_inicial_periodo)
+    end_ts = pd.Timestamp(data_final_periodo)
 
-    media_idade_filtrada = df_filtrado['idade'].mean().round(1) if total_funcionarios_filtrados > 0 else 0
+    # Desligamentos no período, filtrando por 'demissao' e status 'DESLIGADO'
+    # Garante que 'demissao' não é NaT (ou seja, só conta se houver data de demissão)
+    # e que a data de demissão está dentro do período selecionado.
+    desligamentos_no_periodo = df_filtrado[
+        (df_filtrado['status'] == 'DESLIGADO') &
+        (df_filtrado['demissao'].notna()) & # Garante que há uma data de demissão
+        (df_filtrado['demissao'] >= start_ts) & # Comparação direta com Timestamp
+        (df_filtrado['demissao'] <= end_ts)     # Comparação direta com Timestamp
+    ].shape[0]
 
+    # --- Cálculo do Tempo Médio de Empresa ---
+    tempo_de_empresa_em_anos = []
+    today = datetime.date.today()
+    for index, row in df_filtrado[df_filtrado['status'].isin(['ATIVO', 'EXPERIENCIA'])].iterrows():
+        if pd.notna(row['admissao']):
+            diff = relativedelta(today, row['admissao'].date())
+            tempo_de_empresa_em_anos.append(diff.years + diff.months/12 + diff.days/365.25)
+    
+    tempo_medio_empresa = 0.0
+    if tempo_de_empresa_em_anos:
+        tempo_medio_empresa = sum(tempo_de_empresa_em_anos) / len(tempo_de_empresa_em_anos)
+
+
+    # --- Exibição dos KPIs ---
     with st.container(border=True):
         with kpi1:
             with st.container(border=True):
-                c11, c12 = st.columns([0.8, 1.8])
-                with c11:
-                    st.image("img/ativos.png", width=75)
-                with c12:
-                    st.metric("Funcionários Ativos", total_funcionarios_filtrados)
+                st.image("img/ativos.png", width=75)
+                st.metric("Funcionários Ativos", total_funcionarios_filtrados)
 
         with kpi2:
             with st.container(border=True):
-                c21, c22 = st.columns([0.8, 1.8])
-                with c21:
-                    st.image("img/contratados.png", width=75)
-                with c22:
-                    st.metric("Contratações 2025", contratacoes_2025)
+                st.image("img/contratados.png", width=75)
+                st.metric("Contratações no Período", contratacoes_no_periodo)
 
         with kpi3:
             with st.container(border=True):
-                c31, c32 = st.columns([0.8, 1.8])
-                with c31:
-                    st.image("img/desligados.png", width=75)
-                with c32:
-                    st.metric("Desligamentos 2025", desligamentos_2025)
+                st.image("img/desligados.png", width=75)
+                st.metric("Desligamentos no Período", desligamentos_no_periodo)
 
-        with kpi4:
+        with kpi4: # Antigo kpi5, agora kpi4
             with st.container(border=True):
-                c41, c42 = st.columns([0.8, 1.8])
-                with c41:
-                    st.image("img/x.png", width=75)
-                with c42:
-                    st.metric("Média de Idade", media_idade_filtrada)
+                # Substituído por emoji para evitar erro de imagem
+                st.markdown("### ⏳") # Emoji de relógio de areia para "Tempo Médio Empresa"
+                st.metric("Tempo Médio Empresa", f"{tempo_medio_empresa:.1f} anos")
 
-    with kpi5:
-        st.image("img/im2.jpg", width=120)
 
 def render_aniversaries_and_vacations_section(df_filtrado, meses_portugues_dict):
     """

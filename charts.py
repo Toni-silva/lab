@@ -211,3 +211,65 @@ def create_cost_type_distribution_chart(df):
     fig.update_traces(textinfo='percent+label', pull=[0.05] * len(custo_tipo_counts))
     return fig
 
+# --- Novos gráficos sugeridos na última interação (mantidos, mas turnover será removido) ---
+
+# REMOVIDO: create_monthly_turnover_trend_chart
+# def create_monthly_turnover_trend_chart(df):
+#     """
+#     Cria um gráfico de linha que mostra a tendência de desligamentos mensais.
+#     Assumimos que 'status' == 'DESLIGADO' para desligamentos.
+#     Para um cálculo mais preciso, seria ideal ter uma 'data_desligamento'.
+#     """
+#     if df.empty:
+#         return go.Figure().update_layout(title_text="Sem dados para Tendência de Desligamentos Mensais.")
+
+#     # Filtra apenas os desligados
+#     df_desligados = df[df['status'] == 'DESLIGADO'].copy()
+    
+#     # Agrupa por mês de admissão (usado como proxy para o evento no período)
+#     # Em um cenário real, usaríamos a 'data_desligamento' real.
+#     desligamentos_por_mes = df_desligados.groupby(df_desligados['admissao'].dt.to_period('M')).size().reset_index(name='Contagem')
+#     desligamentos_por_mes['admissao'] = desligamentos_por_mes['admissao'].dt.to_timestamp() # Converte para datetime para Plotly
+    
+#     fig = px.line(
+#         desligamentos_por_mes,
+#         x='admissao',
+#         y='Contagem',
+#         title='Tendência de Desligamentos Mensais',
+#         labels={'admissao': 'Mês', 'Contagem': 'Número de Desligamentos'},
+#         markers=True
+#     )
+#     fig.update_xaxes(dtick="M1", tickformat="%b\n%Y") # Formato de mês/ano
+#     return fig
+
+def create_hires_vs_terminations_chart(df):
+    """
+    Cria um gráfico de barras comparando contratações e desligamentos por mês.
+    """
+    if df.empty:
+        return go.Figure().update_layout(title_text="Sem dados para Contratações vs. Desligamentos.")
+
+    # Agrupa contratações por mês
+    df_contratacoes = df.groupby(df['admissao'].dt.to_period('M')).size().reset_index(name='Contratações')
+    df_contratacoes['admissao'] = df_contratacoes['admissao'].dt.to_timestamp()
+
+    # Agrupa desligamentos por mês (baseado na data de admissão e status 'DESLIGADO' como proxy)
+    df_desligamentos = df[df['status'] == 'DESLIGADO'].groupby(df['admissao'].dt.to_period('M')).size().reset_index(name='Desligamentos')
+    df_desligamentos['admissao'] = df_desligamentos['admissao'].dt.to_timestamp()
+
+    # Une os DataFrames
+    df_merged = pd.merge(df_contratacoes, df_desligamentos, on='admissao', how='outer').fillna(0)
+    df_merged = df_merged.sort_values('admissao')
+
+    fig = go.Figure(data=[
+        go.Bar(name='Contratações', x=df_merged['admissao'], y=df_merged['Contratações'], marker_color='#3b82f6'),
+        go.Bar(name='Desligamentos', x=df_merged['admissao'], y=df_merged['Desligamentos'], marker_color='#ef4444')
+    ])
+    fig.update_layout(
+        barmode='group',
+        title='Contratações vs. Desligamentos Mensais',
+        xaxis_title='Mês',
+        yaxis_title='Contagem',
+        xaxis=dict(dtick="M1", tickformat="%b\n%Y")
+    )
+    return fig
